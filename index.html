@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Family Budget Tracker - Google Sheets Sync</title>
+    <title>Family Budget Tracker</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@300;400;500;600&display=swap');
         
@@ -144,6 +144,18 @@
             border-radius: 12px;
             padding: 24px;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .summary-card:hover {
+            border-color: #fbbf24;
+            transform: translateY(-2px);
+        }
+        
+        .summary-card.active {
+            border: 2px solid #fbbf24;
+            box-shadow: 0 8px 24px rgba(251, 191, 36, 0.3);
         }
         
         .summary-card h3 {
@@ -462,6 +474,17 @@
             border-radius: 6px;
         }
         
+        .filter-hint {
+            background: rgba(251, 191, 36, 0.1);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 0.875rem;
+            color: #fbbf24;
+            text-align: center;
+        }
+        
         @media (max-width: 768px) {
             .header h1 {
                 font-size: 2rem;
@@ -529,6 +552,9 @@
         
         <div class="section">
             <h2>Category Breakdown</h2>
+            <div id="filterHint" class="filter-hint" style="display: none;">
+                💡 Click on a person's card above to filter categories
+            </div>
             <div id="categoryGrid" class="category-grid"></div>
         </div>
         
@@ -540,7 +566,6 @@
                         <option value="all">All People</option>
                         <option value="Kashaf">Kashaf</option>
                         <option value="Zabih Ullah">Zabih Ullah</option>
-                        <option value="Shared">Shared</option>
                     </select>
                     <select id="filterCategory" onchange="renderTransactions()">
                         <option value="all">All Categories</option>
@@ -584,20 +609,24 @@
                         Replace all existing code with this:
                     </p>
                     <textarea readonly class="code-box" id="scriptCode" style="width: 100%; height: 200px; margin: 8px 0;">function doGet(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Transactions');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let transSheet = ss.getSheetByName('Transactions');
+  let budgetSheet = ss.getSheetByName('Budgets');
   
-  if (!sheet) {
-    const newSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('Transactions');
-    newSheet.appendRow(['ID', 'Person', 'Category', 'Amount', 'Date', 'Notes', 'Timestamp']);
-    return ContentService.createTextOutput(JSON.stringify({transactions: []})).setMimeType(ContentService.MimeType.JSON);
+  if (!transSheet) {
+    transSheet = ss.insertSheet('Transactions');
+    transSheet.appendRow(['ID', 'Person', 'Category', 'Amount', 'Date', 'Notes', 'Timestamp']);
   }
   
-  const data = sheet.getDataRange().getValues();
-  const headers = data[0];
-  const transactions = [];
+  if (!budgetSheet) {
+    budgetSheet = ss.insertSheet('Budgets');
+    budgetSheet.appendRow(['Person', 'Category', 'Amount']);
+  }
   
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
+  const transData = transSheet.getDataRange().getValues();
+  const transactions = [];
+  for (let i = 1; i < transData.length; i++) {
+    const row = transData[i];
     transactions.push({
       id: row[0],
       person: row[1],
@@ -608,41 +637,63 @@
     });
   }
   
-  return ContentService.createTextOutput(JSON.stringify({transactions})).setMimeType(ContentService.MimeType.JSON);
+  const budgetData = budgetSheet.getDataRange().getValues();
+  const budgets = {};
+  for (let i = 1; i < budgetData.length; i++) {
+    const row = budgetData[i];
+    const person = row[0];
+    const category = row[1];
+    const amount = row[2];
+    
+    if (!budgets[person]) budgets[person] = {};
+    budgets[person][category] = amount;
+  }
+  
+  return ContentService.createTextOutput(JSON.stringify({transactions, budgets})).setMimeType(ContentService.MimeType.JSON);
 }
 
 function doPost(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Transactions');
-  
-  if (!sheet) {
-    const newSheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('Transactions');
-    newSheet.appendRow(['ID', 'Person', 'Category', 'Amount', 'Date', 'Notes', 'Timestamp']);
-  }
-  
   const data = JSON.parse(e.postData.contents);
-  const activeSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Transactions');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   
   if (data.action === 'add') {
-    activeSheet.appendRow([
-      data.id,
-      data.person,
-      data.category,
-      data.amount,
-      data.date,
-      data.notes || '',
-      new Date()
-    ]);
+    let sheet = ss.getSheetByName('Transactions');
+    if (!sheet) {
+      sheet = ss.insertSheet('Transactions');
+      sheet.appendRow(['ID', 'Person', 'Category', 'Amount', 'Date', 'Notes', 'Timestamp']);
+    }
+    sheet.appendRow([data.id, data.person, data.category, data.amount, data.date, data.notes || '', new Date()]);
     return ContentService.createTextOutput(JSON.stringify({success: true})).setMimeType(ContentService.MimeType.JSON);
   }
   
   if (data.action === 'delete') {
-    const allData = activeSheet.getDataRange().getValues();
+    const sheet = ss.getSheetByName('Transactions');
+    const allData = sheet.getDataRange().getValues();
     for (let i = 1; i < allData.length; i++) {
       if (allData[i][0] == data.id) {
-        activeSheet.deleteRow(i + 1);
+        sheet.deleteRow(i + 1);
         break;
       }
     }
+    return ContentService.createTextOutput(JSON.stringify({success: true})).setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  if (data.action === 'updateBudgets') {
+    let sheet = ss.getSheetByName('Budgets');
+    if (!sheet) {
+      sheet = ss.insertSheet('Budgets');
+      sheet.appendRow(['Person', 'Category', 'Amount']);
+    } else {
+      sheet.clear();
+      sheet.appendRow(['Person', 'Category', 'Amount']);
+    }
+    
+    Object.keys(data.budgets).forEach(person => {
+      Object.keys(data.budgets[person]).forEach(category => {
+        sheet.appendRow([person, category, data.budgets[person][category]]);
+      });
+    });
+    
     return ContentService.createTextOutput(JSON.stringify({success: true})).setMimeType(ContentService.MimeType.JSON);
   }
   
@@ -699,7 +750,6 @@ function doPost(e) {
                     <select id="personSelect" onchange="updateCategoryOptions()" required>
                         <option value="Kashaf">Kashaf</option>
                         <option value="Zabih Ullah">Zabih Ullah</option>
-                        <option value="Shared">Shared</option>
                     </select>
                 </div>
                 
@@ -744,7 +794,7 @@ function doPost(e) {
             </div>
             
             <div class="info-box">
-                ℹ️ Add or remove budget categories for each person
+                ℹ️ Add or remove budget categories. Changes will sync across all devices.
             </div>
             
             <div class="form-group">
@@ -752,7 +802,6 @@ function doPost(e) {
                 <select id="categoryPersonSelect" onchange="displayCategories()">
                     <option value="Kashaf">Kashaf</option>
                     <option value="Zabih Ullah">Zabih Ullah</option>
-                    <option value="Shared">Shared</option>
                 </select>
             </div>
             
@@ -810,25 +859,13 @@ function doPost(e) {
                 'Personal + Entertainment': 180000,
                 'Kids School Fee': 64000,
                 'Fuel': 100000
-            },
-            'Shared': {
-                'Health': 0
             }
         };
-        
-        // Load custom budgets from localStorage
-        const savedBudgets = localStorage.getItem('customBudgets');
-        if (savedBudgets) {
-            budgets = JSON.parse(savedBudgets);
-        }
-        
-        function saveBudgets() {
-            localStorage.setItem('customBudgets', JSON.stringify(budgets));
-        }
         
         let transactions = [];
         let webAppUrl = localStorage.getItem('budgetWebAppUrl') || '';
         let isLoading = false;
+        let selectedPerson = 'Zabih Ullah'; // Default to Zabih Ullah
         
         function updateSyncStatus(message, isError = false) {
             const status = document.getElementById('syncStatus');
@@ -863,12 +900,41 @@ function doPost(e) {
                 const response = await fetch(webAppUrl);
                 const data = await response.json();
                 transactions = data.transactions || [];
+                
+                // Load budgets from Google Sheets if available
+                if (data.budgets && Object.keys(data.budgets).length > 0) {
+                    budgets = data.budgets;
+                } else {
+                    // First time setup - save default budgets to Google Sheets
+                    await syncBudgets();
+                }
+                
                 updateSyncStatus('Synced');
                 renderAll();
             } catch (error) {
                 console.error('Error loading transactions:', error);
                 updateSyncStatus('Sync failed', true);
                 alert('Failed to load data from Google Sheets. Please check your setup.');
+            }
+        }
+        
+        async function syncBudgets() {
+            if (!checkSetup()) return false;
+            
+            try {
+                const response = await fetch(webAppUrl, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'updateBudgets',
+                        budgets: budgets
+                    })
+                });
+                
+                const result = await response.json();
+                return result.success;
+            } catch (error) {
+                console.error('Error syncing budgets:', error);
+                return false;
             }
         }
         
@@ -901,6 +967,20 @@ function doPost(e) {
                 alert('Failed to sync with Google Sheets. Please try again.');
                 return false;
             }
+        }
+        
+        function selectPerson(person) {
+            selectedPerson = person;
+            renderCategoryBreakdown();
+            
+            // Update active state on cards
+            document.querySelectorAll('.summary-card').forEach(card => {
+                card.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+            
+            // Show hint
+            document.getElementById('filterHint').style.display = 'block';
         }
         
         function openSetupModal() {
@@ -988,9 +1068,10 @@ function doPost(e) {
                 const totalSpent = Object.entries(totals[person]).reduce((sum, [_, data]) => sum + data.spent, 0);
                 const percentage = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
                 const isOver = totalSpent > totalBudget;
+                const isActive = person === selectedPerson;
                 
                 return `
-                    <div class="summary-card">
+                    <div class="summary-card ${isActive ? 'active' : ''}" onclick="selectPerson('${person}')">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
                             <div>
                                 <h3>${person}</h3>
@@ -1030,16 +1111,18 @@ function doPost(e) {
             const container = document.getElementById('categoryGrid');
             
             const categories = [];
-            Object.entries(totals).forEach(([person, personCategories]) => {
-                Object.entries(personCategories).forEach(([category, data]) => {
+            
+            // Only show categories for selected person
+            if (totals[selectedPerson]) {
+                Object.entries(totals[selectedPerson]).forEach(([category, data]) => {
                     if (data.spent > 0 || data.budget > 0) {
-                        categories.push({ person, category, ...data });
+                        categories.push({ person: selectedPerson, category, ...data });
                     }
                 });
-            });
+            }
             
             if (categories.length === 0) {
-                container.innerHTML = '<p style="color: #94a3b8; text-align: center; padding: 20px;">No spending data yet</p>';
+                container.innerHTML = `<p style="color: #94a3b8; text-align: center; padding: 20px;">No spending data yet for ${selectedPerson}</p>`;
                 return;
             }
             
@@ -1149,6 +1232,9 @@ function doPost(e) {
             }
             document.getElementById('addModal').classList.add('active');
             document.getElementById('dateInput').value = new Date().toISOString().split('T')[0];
+            
+            // Set default person to current user (Zabih Ullah)
+            document.getElementById('personSelect').value = selectedPerson;
             updateCategoryOptions();
         }
         
@@ -1159,6 +1245,7 @@ function doPost(e) {
         
         function openCategoryModal() {
             document.getElementById('categoryModal').classList.add('active');
+            document.getElementById('categoryPersonSelect').value = selectedPerson;
             displayCategories();
         }
         
@@ -1176,23 +1263,69 @@ function doPost(e) {
                 <div style="background: #1e293b; border: 1px solid #475569; border-radius: 8px; padding: 16px;">
                     <h4 style="color: #fbbf24; margin-bottom: 12px; font-size: 1rem;">Current Categories</h4>
                     ${Object.entries(categories).map(([name, budget]) => `
-                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #475569;">
-                            <div>
-                                <div style="color: white; font-weight: 500;">${name}</div>
-                                <div style="color: #94a3b8; font-size: 0.875rem;">${formatCurrency(budget)}</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #475569; gap: 12px;">
+                            <div style="flex: 1;">
+                                <div style="color: white; font-weight: 500; margin-bottom: 4px;">${name}</div>
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <input 
+                                        type="number" 
+                                        id="budget_${person}_${name.replace(/[^a-zA-Z0-9]/g, '_')}"
+                                        value="${budget}"
+                                        min="0"
+                                        step="1000"
+                                        style="width: 150px; padding: 6px 10px; background: #334155; border: 1px solid #475569; border-radius: 6px; color: white; font-size: 0.875rem;"
+                                        onchange="updateCategoryBudget('${person}', '${name}', this.value)"
+                                    >
+                                    <span style="color: #94a3b8; font-size: 0.75rem;">PKR</span>
+                                </div>
                             </div>
-                            <button 
-                                class="delete-btn" 
-                                onclick="removeCategory('${person}', '${name}')"
-                                style="font-size: 1.25rem; padding: 8px;"
-                            >✕</button>
+                            <div style="display: flex; gap: 8px; align-items: center;">
+                                <button 
+                                    class="delete-btn" 
+                                    onclick="removeCategory('${person}', '${name}')"
+                                    style="font-size: 1.25rem; padding: 8px;"
+                                    title="Delete category"
+                                >✕</button>
+                            </div>
                         </div>
                     `).join('')}
                 </div>
             `;
         }
         
-        function addNewCategory(event) {
+        async function updateCategoryBudget(person, categoryName, newBudget) {
+            const amount = parseFloat(newBudget);
+            
+            if (isNaN(amount) || amount < 0) {
+                alert('Please enter a valid budget amount');
+                displayCategories(); // Reset display
+                return;
+            }
+            
+            const oldBudget = budgets[person][categoryName];
+            budgets[person][categoryName] = amount;
+            
+            // Sync to Google Sheets
+            const success = await syncBudgets();
+            
+            if (success) {
+                renderAll();
+                // Show success feedback
+                const input = document.getElementById(`budget_${person}_${categoryName.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                if (input) {
+                    input.style.borderColor = '#10b981';
+                    setTimeout(() => {
+                        input.style.borderColor = '#475569';
+                    }, 1000);
+                }
+            } else {
+                budgets[person][categoryName] = oldBudget; // Rollback
+                alert('Failed to sync budget change. Please try again.');
+                displayCategories(); // Reset display
+            }
+        }
+        
+        async function addNewCategory(event) {
             event.preventDefault();
             
             const person = document.getElementById('categoryPersonSelect').value;
@@ -1210,17 +1343,22 @@ function doPost(e) {
             }
             
             budgets[person][name] = budget;
-            saveBudgets();
             
-            document.getElementById('addCategoryForm').reset();
-            displayCategories();
-            renderAll();
+            // Sync to Google Sheets
+            const success = await syncBudgets();
             
-            alert(`Category "${name}" added successfully!`);
+            if (success) {
+                document.getElementById('addCategoryForm').reset();
+                displayCategories();
+                renderAll();
+                alert(`Category "${name}" added successfully!`);
+            } else {
+                delete budgets[person][name]; // Rollback
+                alert('Failed to sync category. Please try again.');
+            }
         }
         
-        function removeCategory(person, categoryName) {
-            // Check if there are any transactions for this category
+        async function removeCategory(person, categoryName) {
             const hasTransactions = transactions.some(t => t.person === person && t.category === categoryName);
             
             if (hasTransactions) {
@@ -1233,10 +1371,19 @@ function doPost(e) {
                 }
             }
             
+            const oldBudget = budgets[person][categoryName];
             delete budgets[person][categoryName];
-            saveBudgets();
-            displayCategories();
-            renderAll();
+            
+            // Sync to Google Sheets
+            const success = await syncBudgets();
+            
+            if (success) {
+                displayCategories();
+                renderAll();
+            } else {
+                budgets[person][categoryName] = oldBudget; // Rollback
+                alert('Failed to sync changes. Please try again.');
+            }
         }
         
         function updateCategoryOptions() {
@@ -1302,6 +1449,9 @@ function doPost(e) {
         checkSetup();
         if (webAppUrl) {
             loadTransactions();
+        } else {
+            renderSummaryCards(); // Show empty state
+            renderCategoryBreakdown();
         }
     </script>
 </body>
